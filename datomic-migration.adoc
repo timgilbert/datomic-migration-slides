@@ -1,0 +1,9 @@
+= Intro to ClojureScript
+:author:    Tim Gilbert <timothy_L.gilbert@nytimes.com>
+:docdate: 2017-03-15
+:source-highlighter: pygments
+:backend: slidy
+:max-width: 45em
+:data-uri: https://github.com/timgilbert/cljs-intro-slides/
+:icons:
+
