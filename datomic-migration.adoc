@@ -1,9 +1,149 @@
-= Intro to ClojureScript
-:author:    Tim Gilbert <timothy_L.gilbert@nytimes.com>
+= A datomic migration strategy
+:author:    Tim Gilbert <tim@workframe.com>
 :docdate: 2017-03-15
 :source-highlighter: pygments
 :backend: slidy
 :max-width: 45em
-:data-uri: https://github.com/timgilbert/cljs-intro-slides/
+:data-uri: https://github.com/timgilbert/datomic-migration-slides/
 :icons:
 
+== Agenda
+- Intro
+- Strengths of datomic
+- Finding features that match datomic
+- Potential trouble spots
+
+== Intro
+- Workframe's previous incarnation was Kontor
+- Main application was a Clojure server connected to a Postgres back-end
+** Classic three-tier web server exposing a JSON REST(ish) API
+- Datomic sounded really cool and we wanted to try it out
+** But changing everything over would be an enormous effort
+
+== Strengths of datomic over SQL
+- Graph database features
+- Heterogenous collections
+- Historical data
+- Transaction data can be generated from pure functions
+- More sane, immutable data model
+** You get a database value once and pass it down through functions
+- Most data is cached in RAM in the application
+** Also easy and seamless memcache integration
+** Can be a good alternative to redis and similar systems 
+
+== Advice for trying out datomic
+- Find a new feature or implementation that is relatively disconnected from the rest of your data 
+- Figure out a synchronization strategy between your SQL datastore and Datomic
+
+== Our experience: new "notifications" feature
+- Users can receive notifications based on various system events
+- Notifications appear on the web application and email (two applications)
+- A notification consists of a unique ID, the user-id of the user who received it, an opaque 
+  JSON payload and read/unread status
+- REST endpoints for creating new ones and marking old ones as read
+
+== Why notifications?
+This feature doesn't seem like an obviously good fit for datomic:
+
+* Data changes frequently and is transitory
+* Doesn't really use the graph database features
+* Not much value in the history of changes
+* Big blob of JSON data can't really be queried 
+
+...but it did have some key advantages:
+
+- New system, therefore less integration
+- Very simple domain model
+** Needed to import less existing data from SQL to datomic
+- Used in two separate applications
+
+== How did it go?
+
+Pretty well!
+
+- In a classic 3-tier MVC/REST server, just added a new `models/datomic` namespace
+- Initiate datomic connection on startup
+- Mutation routines largely consisted of pure EDN-generating functions
+- Thin translation layer on top of queries to re-shape data for the front-end
+- View from the controller was largely the same between Postgres/datomic model code
+- Deploying this to production forced us to figure out deployment and DevOps stuff
+
+However, during this project we didn't need to do extremely deep integration with existing features
+
+== Some good practices
+- Use `conformity` to manage schemas and add static data
+** Gives you a single place to track changes, under source control
+** Package `.edn` files in the jar and run them at application startup time
+** Migrations are guaranteed to run only once per environment
+- Create and destroy in-memory databases for unit/integration tests
+- Be cognizant of when you call `(d/db)` to get a new database value
+
+== Brief conformity example
+[source,clojure]
+------------------------------------------------------
+{;; Schema definition
+ :2016-02-01.02/notification-attributes
+ {:txes [[{:db/doc "Unique user-id"
+           :db/ident :user/id
+           :db/id #db/id[:db.part/db]
+           :db/unique :db.unique/identity
+           :db/valueType :db.type/long
+           :db/cardinality :db.cardinality/one
+           :db.install/_attribute :db.part/db}]]
+  :requires []}
+ 
+ ;; Adding data
+ :2016-02-01.02/add-read-messages
+ {:txes [[{:db/id [:person/email "romeo@montague.com"]
+           :person/read-messages [[:message/id 45] [:message/id 67]]}]]
+  :requires [:2016-02-01.02/notification-attributes]}}
+------------------------------------------------------
+
+== Trouble spots: deployment
+* datomic transactor (server) comes packaged as a zip file or an Amazon AMI image
+* The AMI version does not expose SSH access
+** We wound up rolling our own via shell scripts
+* A few open-source projects exist for standing up transactors via docker, terraform, packer, etc
+** Still a pretty manual process with these
+* Logging is configurable, but takes some work
+
+== Trouble spots: data integration
+- Running with two data storage systems can be a right pain
+- Datomic `:ref` attributes are used as pointers in the system from one entity to another
+** But the entities that they point to must exist
+** Therefore if the data model in datomic includes users, you need to export all user-ids from SQL to datomic
+** Now when a new user is created, you must eventually create the ID in both data stores
+
+== Trouble spots: the learning curve
+* New query syntax
+* New idioms
+** Datoms vs tables and joins
+** Lookup refs: `[:person/email "tim@workframe.com"]`
+* Datomic docs - valuable but limited
+* Security concerns
+* No sequences (but UUID usage mitigates this)
+
+== Trouble spots: misc
+- The datomic console is not super useful
+** Your best tool is a REPL connected to datomic with your application code available
+- No built-in facility for running more code-oriented migrations
+** Eg, query for all users where condition `X` is true, set their status to `Y`
+
+== Recent datomic changes that are cool
+- Licensing model: no longer insane!
+** Old model based on "peer seats" (one per client or server) - hostile to microservices
+** New model: unlimited clients and servers, upgrades for 1 year
+- String tempids - simpler, less boilerplate
+- Client / server model available in addition to peer model
+
+== Stuff that helped during the learning process
+- Datomic videos, especially the "Operational Model"
+- `#datomic` channel on Clojurians Slack
+- Sit down talk with friendly developers we knew who were running datomic
+- Mailing list
+
+== Questions?
+
+Email me: tim@workframe.com
+
+Github: https://github.com/timgilbert/
